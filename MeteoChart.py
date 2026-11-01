@@ -171,7 +171,7 @@ def create_temperature_chart(data: pd.DataFrame) -> px.line:
     )
 
     figure.update_layout(
-        height=600,
+        height=300,
         hovermode="x unified",
         margin={"l": 20, "r": 20, "t": 30, "b": 20},
     )
