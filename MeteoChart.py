@@ -180,7 +180,7 @@ def create_temperature_chart(data: pd.DataFrame) -> px.line:
 
 
 def main() -> None:
-    st.title("Temperatura na stacjach IMGW")
+    #st.title("Temperatura na stacjach IMGW")
 
     try:
         stations = load_stations()
@@ -264,7 +264,7 @@ def main() -> None:
 
         st.session_state.start_date = selected_date
 
-        if st.button("Odśwież", use_container_width=True):
+        if st.button("Odśwież", width='stretch'):
             st.cache_data.clear()
             st.rerun()
 
@@ -315,10 +315,10 @@ def main() -> None:
         st.info("Brak danych w wybranym zakresie dat.")
         return
 
-    st.subheader(format_station(stations_by_id[selected_station_id]))
+    st.subheader("Temperatura na stacji IMGW: " + format_station(stations_by_id[selected_station_id]))
     st.plotly_chart(
         create_temperature_chart(data),
-        use_container_width=True,
+        width='stretch',
     )
 
 
