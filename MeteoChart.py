@@ -8,13 +8,14 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 import extra_streamlit_components as stx
 
 
 STATIONS_URL = "https://klimat.imgw.pl/json/stacje.json"
-TEMPERATURE_URL = "https://hydro-back.imgw.pl/station/meteo/data"
+WEATHER_DATA_URL = "https://hydro-back.imgw.pl/station/meteo/data"
 
 DEFAULT_STATION_ID = "352230399"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -76,54 +77,74 @@ def load_stations() -> list[dict[str, Any]]:
 
 
 @st.cache_data(ttl=300)
-def load_temperature(
+def load_weather_data(
     station_id: str,
     hours_interval: int,
 ) -> pd.DataFrame:
 
     response = get_json(
-        TEMPERATURE_URL,
+        WEATHER_DATA_URL,
         params={
             "id": station_id,
             "hoursInterval": hours_interval,
         },
     )
 
-    temperature_entries = response.get("temperature", [])
+    def parse_series(
+        entries: list[dict[str, Any]],
+        column: str,
+    ) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        warsaw_timezone = ZoneInfo("Europe/Warsaw")
 
-    if not temperature_entries:
-        return pd.DataFrame(columns=["date", "temperature"])
+        for entry in entries:
+            raw_date = entry.get("date")
+            value = entry.get("value")
 
-    rows: list[dict[str, Any]] = []
+            if raw_date is None or value is None:
+                continue
 
-    warsaw_timezone = ZoneInfo("Europe/Warsaw")
+            try:
+                # Daty z API są traktowane jako UTC.
+                measured_date = pd.to_datetime(
+                    raw_date,
+                    utc=True,
+                ).tz_convert(warsaw_timezone)
+                measurement = float(value)
+            except (TypeError, ValueError):
+                continue
 
-    for entry in temperature_entries:
-        raw_date = entry.get("date")
-        value = entry.get("value")
+            rows.append(
+                {
+                    "date": measured_date,
+                    column: measurement,
+                }
+            )
 
-        if raw_date is None or value is None:
-            continue
+        if not rows:
+            return pd.DataFrame(
+                {
+                    "date": pd.Series(dtype="datetime64[ns, UTC]"),
+                    column: pd.Series(dtype="float64"),
+                }
+            )
 
-        try:
-            # Daty z API są traktowane jako UTC.
-            measured_date = pd.to_datetime(
-                raw_date,
-                utc=True,
-            ).tz_convert(warsaw_timezone)
+        return pd.DataFrame(rows)
 
-            temperature = float(value)
-        except (TypeError, ValueError):
-            continue
+    temperature_data = parse_series(
+        response.get("temperature", []),
+        "temperature",
+    )
+    precipitation_data = parse_series(
+        response.get("precip", []),
+        "precipitation",
+    )
 
-        rows.append(
-            {
-                "date": measured_date,
-                "temperature": temperature,
-            }
-        )
-
-    return pd.DataFrame(rows)
+    return temperature_data.merge(
+        precipitation_data,
+        on="date",
+        how="outer",
+    )
 
 
 def calculate_hours_interval(start_date: date) -> int:
@@ -141,7 +162,7 @@ def format_station(station: dict[str, Any]) -> str:
     return f"{name} ({station_id})"
 
 
-def create_temperature_chart(data: pd.DataFrame) -> px.line:
+def create_weather_chart(data: pd.DataFrame) -> px.line:
     chart_data = data.copy()
     chart_data["date_label"] = chart_data["date"].dt.strftime("%Y-%m-%d %H:%M")
 
@@ -170,10 +191,36 @@ def create_temperature_chart(data: pd.DataFrame) -> px.line:
         ),
     )
 
+    precipitation_data = chart_data.dropna(subset=["precipitation"])
+    figure.add_trace(
+        go.Bar(
+            x=precipitation_data["date"],
+            y=precipitation_data["precipitation"],
+            name="Opady",
+            marker_color="rgba(144, 238, 144, 0.5)",
+            yaxis="y2",
+            customdata=precipitation_data[["date_label"]].to_numpy(),
+            hovertemplate=(
+                "Data: %{customdata[0]}<br>"
+                "Opady: %{y:.2f} mm"
+                "<extra></extra>"
+            ),
+        )
+    )
+
     figure.update_layout(
-        height=300,
+        autosize=True,
+        height=None, #300,
         hovermode="x unified",
         margin={"l": 20, "r": 20, "t": 30, "b": 20},
+        yaxis2={
+            "title": "Opady (mm/h)",
+            "overlaying": "y",
+            "side": "right",
+            "rangemode": "tozero",
+            "tickformat": ".1f"
+        },
+        barmode="overlay",
     )
 
     return figure
@@ -276,7 +323,7 @@ def main() -> None:
     hours_interval = calculate_hours_interval(selected_date)
 
     try:
-        data = load_temperature(
+        data = load_weather_data(
             selected_station_id,
             hours_interval,
         )
@@ -292,7 +339,7 @@ def main() -> None:
         return
 
     if data.empty:
-        st.info("Brak danych o temperaturze dla wybranego okresu.")
+        st.info("Brak danych meteorologicznych dla wybranego okresu.")
         return
     
     # Ujednolicenie dat: UTC-aware -> naive datetime.
@@ -317,8 +364,9 @@ def main() -> None:
 
     st.subheader("Temperatura na stacji IMGW: " + format_station(stations_by_id[selected_station_id]))
     st.plotly_chart(
-        create_temperature_chart(data),
-        width='stretch',
+        create_weather_chart(data),
+        width ='stretch',
+        height = 'stretch'
     )
 
 
