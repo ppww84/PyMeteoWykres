@@ -218,7 +218,7 @@ def create_weather_chart(data: pd.DataFrame) -> px.line:
             "overlaying": "y",
             "side": "right",
             "rangemode": "tozero",
-            "tickformat": ".1f"
+            "tickformat": ".2f"
         },
         barmode="overlay",
     )
